@@ -2,20 +2,20 @@ import logging
 import asyncio
 import aiosqlite
 import requests
-from aiogram.types import FSInputFile
 import csv
 import os
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InputFile
 
 API_TOKEN = '8431247395:AAFSgmZtptwXRPI6l7hFee9Kzt2OX5_EnSE'
 ADMIN_ID = 5049741772
-WEBAPP_URL = 'https://fresh-interfaces-427134.framer.app/'
+WEBAPP_URL = 'https://samokat.ru/'
 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)
 waiting_for_location = {}
 
 # === БАЗА ДАННЫХ ===
@@ -55,9 +55,8 @@ async def get_all_users():
         cursor = await db.execute("SELECT user_id FROM users WHERE registered = 1")
         return [row[0] for row in await cursor.fetchall()]
 
-# === СПЕЦИАЛЬНЫЕ ХЕНДЛЕРЫ - ВВЕРХУ! ===
-
-@dp.message(F.photo)
+# === ФОТО/ВИДЕО РАССЫЛКА АДМИНУ ===
+@dp.message_handler(content_types=['photo'])
 async def admin_photo_broadcast(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
@@ -75,7 +74,7 @@ async def admin_photo_broadcast(message: types.Message):
             print(e)
     await message.answer(f"📸 Фото разослано {success} пользователям")
 
-@dp.message(F.video)
+@dp.message_handler(content_types=['video'])
 async def admin_video_broadcast(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
@@ -93,15 +92,14 @@ async def admin_video_broadcast(message: types.Message):
             print(e)
     await message.answer(f"🎬 Видео разослано {success} пользователям")
 
-# === БАЗОВЫЕ КОМАНДЫ И РЕГИСТРАЦИЯ ===
-
-@dp.message(Command("start"))
+# === СТАРТ/РЕГИСТРАЦИЯ ===
+@dp.message_handler(commands=['start'])
 async def start_command(message: types.Message):
     user_id = message.from_user.id
     if await is_registered(user_id):
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🛒 Открыть магазин", web_app=WebAppInfo(url=WEBAPP_URL))]
-        ])
+        keyboard = InlineKeyboardMarkup().add(
+            InlineKeyboardButton(text="🛒 Открыть магазин", url=WEBAPP_URL)
+        )
         await message.answer("С возвращением! 👋", reply_markup=keyboard)
     else:
         keyboard = ReplyKeyboardMarkup(
@@ -110,7 +108,7 @@ async def start_command(message: types.Message):
         )
         await message.answer("Привет! Отправьте номер для регистрации:", reply_markup=keyboard)
 
-@dp.message(F.contact)
+@dp.message_handler(content_types=["contact"])
 async def get_phone(message: types.Message):
     user_id = message.from_user.id
     phone = message.contact.phone_number
@@ -124,7 +122,7 @@ async def get_phone(message: types.Message):
     waiting_for_location[user_id] = True
     asyncio.create_task(location_timeout(message, user_id))
 
-@dp.message(F.location)
+@dp.message_handler(content_types=["location"])
 async def get_location(message: types.Message):
     user_id = message.from_user.id
     lat = message.location.latitude
@@ -132,10 +130,9 @@ async def get_location(message: types.Message):
     await save_user(user_id, latitude=lat, longitude=lon, registered=1)
     waiting_for_location.pop(user_id, None)
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🛒 Открыть магазин", web_app=WebAppInfo(url=WEBAPP_URL))]
-    ])
-
+    keyboard = InlineKeyboardMarkup().add(
+        InlineKeyboardButton(text="🛒 Открыть магазин", url=WEBAPP_URL)
+    )
     await message.answer("✅ Регистрация завершена!", reply_markup=ReplyKeyboardRemove())
     await message.answer("Добро пожаловать в магазин:", reply_markup=keyboard)
 
@@ -146,8 +143,7 @@ async def location_timeout(message: types.Message, user_id: int):
         waiting_for_location.pop(user_id, None)
 
 # === РАССЫЛКА ТЕКСТА (ТОЛЬКО ДЛЯ АДМИНА) ===
-
-@dp.message(Command("broadcast"))
+@dp.message_handler(commands=['broadcast'])
 async def text_broadcast(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
@@ -165,17 +161,12 @@ async def text_broadcast(message: types.Message):
             pass
     await message.answer(f"📝 Текст отправлен {success} пользователям")
 
-@dp.message(Command("users"))
+@dp.message_handler(commands=['users'])
 async def users_count(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
     count = len(await get_all_users())
     await message.answer(f"👥 Зарегистрировано: {count} пользователей")
-
-
-from aiogram.types import FSInputFile
-
-import concurrent.futures
 
 def geocode_coords(lat, lon):
     if not lat or not lon:
@@ -187,14 +178,12 @@ def geocode_coords(lat, lon):
         if "display_name" in data:
             return data["display_name"]
         elif "address" in data:
-            # Самый точный адрес: улица, город, страна
             addr = data["address"]
             parts = [addr.get(k) for k in ("road", "house_number", "city", "town", "village", "state", "country")]
             return ", ".join([str(p) for p in parts if p])
         return f"{lat}, {lon}"
     except Exception:
         return f"{lat}, {lon}"
-
 
 async def export_csv_ext(message, only_registered: bool):
     async with aiosqlite.connect("users.db") as db:
@@ -205,6 +194,7 @@ async def export_csv_ext(message, only_registered: bool):
             await message.answer("В базе нет подходящих пользователей.")
             return
         filename = "users_export.csv"
+        import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
             geo_texts = list(pool.map(lambda u: geocode_coords(u[2], u[3]), users))
         with open(filename, "w", newline='', encoding="utf-8") as f:
@@ -215,46 +205,41 @@ async def export_csv_ext(message, only_registered: bool):
                 status = "✅" if reg else "❌"
                 coords = f"{lat or '-'}; {lon or '-'}"
                 writer.writerow([idx, user_id, phone or "Нет данных", status, geo_text, coords])
-        doc = FSInputFile(filename)
+        doc = InputFile(filename)
         await bot.send_document(message.chat.id, doc, caption="Выгрузка пользователей (CSV/Excel)")
         try:
             os.remove(filename)
         except Exception:
             pass
 
-@dp.message(Command("export_users_ok"))
+@dp.message_handler(commands=['export_users_ok'])
 async def export_ok(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
     await export_csv_ext(message, only_registered=True)
 
-@dp.message(Command("export_users_all"))
+@dp.message_handler(commands=['export_users_all'])
 async def export_all(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
     await export_csv_ext(message, only_registered=False)
 
-
-
-# === ДЛЯ ВСЕХ ОСТАЛЬНЫХ СООБЩЕНИЙ (В САМОМ НИЗУ!) ===
-
-@dp.message()
+# === ЛЮБОЕ СООБЩЕНИЕ ===
+@dp.message_handler()
 async def any_message(message: types.Message):
     user_id = message.from_user.id
     if await is_registered(user_id):
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="🛒 Открыть магазин", web_app=WebAppInfo(url=WEBAPP_URL))]]
+        keyboard = InlineKeyboardMarkup().add(
+            InlineKeyboardButton(text="🛒 Открыть магазин", url=WEBAPP_URL)
         )
         await message.answer("Используйте кнопку для заказа:", reply_markup=keyboard)
     else:
         await message.answer("Для начала отправьте команду /start")
 
-# === СТАРТ БОТА ===
-async def main():
+async def on_startup(dp):
     await init_db()
     print("🚀 Бот запущен!")
-    await dp.start_polling(bot)
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(main())
+    executor.start_polling(dp, on_startup=on_startup)

@@ -1,4 +1,4 @@
-aiogram==3.4.1
+aiogram==2.25.1
 aiosqlite
 requests
-pydantic==2.5.3
+pydantic==1.10.12
