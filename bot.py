@@ -10,9 +10,9 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.types import InputFile
 
-API_TOKEN = '8431247395:AAFSgmZtptwXRPI6l7hFee9Kzt2OX5_EnSE'
-ADMIN_ID = 5049741772
-WEBAPP_URL = 'https://samokat.ru/'
+API_TOKEN = os.getenv('API_TOKEN')
+ADMIN_ID = int(os.getenv('ADMIN_ID'))
+WEBAPP_URL = os.getenv('WEBAPP_URL')
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
